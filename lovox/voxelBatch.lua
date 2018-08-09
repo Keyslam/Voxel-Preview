@@ -1,0 +1,191 @@
+local PATH = (...):gsub('%.[^%.]+$', '')
+
+local Ffi       = require("ffi")
+local Transform = require(PATH..".transform")
+
+-- Localize 'cos' and 'sin' for a bit more performance in VoxelBatch:updateVoxel
+local cos = math.cos
+local sin = math.sin
+
+-- Define the module, as well as the vertex format
+local VoxelBatch = {
+   vertexFormat = {
+      {"VertexPosition", "float", 3},
+      {"VertexTexCoord", "float", 2},
+   },
+
+   instanceFormat = {
+      {"MatRow1", "float", 4},
+      {"MatRow2", "float", 4},
+      {"MatRow3", "float", 4},
+      {"MatRow4", "float", 4},
+
+      {"VertexColor", "byte", 4}
+   }
+}
+VoxelBatch.__index = VoxelBatch
+
+local function newModelAttributes(voxelCount)
+   local memoryUsage = voxelCount * Transform.instanceSize
+
+   local instanceData    = love.data.newByteData(memoryUsage)
+   local vertexBuffer    = Transform.castInstances(instanceData:getPointer())
+   local modelAttributes = love.graphics.newMesh(VoxelBatch.instanceFormat, instanceData, usage)
+
+   modelAttributes:setVertices(instanceData)
+
+   return modelAttributes, instanceData, vertexBuffer
+end
+
+local function newVertices(width, height, layers)
+   local uvStep = 1 / layers
+
+   local vertices = {}
+
+   for layer = 0, layers - 1 do
+      -- Tbh this part is magic and if anything ever breaks here, just redo it all
+      local start_v, end_v = 1 - layer * uvStep - uvStep, 1 - layer * uvStep
+      local o = (layer * 4)
+
+      local z = layer
+
+      vertices[o+1] = {-width/2, -height/2, layer, 0, start_v}
+      vertices[o+2] = { width/2, -height/2, layer, 1, start_v}
+      vertices[o+3] = {-width/2,  height/2, layer, 0, end_v  }
+      vertices[o+4] = { width/2,  height/2, layer, 1, end_v  }
+   end
+
+   return vertices
+end
+
+local function newVertexMap(layers)
+   local vertexMap = {}
+
+   for i = 0, layers - 1 do
+      local v, o = i * 6, i * 4
+      
+      vertexMap[v+1] = o + 1
+      vertexMap[v+2] = o + 2
+      vertexMap[v+3] = o + 3
+      vertexMap[v+4] = o + 4
+      vertexMap[v+5] = o + 3
+      vertexMap[v+6] = o + 2
+   end
+
+   return vertexMap
+end
+
+--- Creates a new mesh for voxels.
+-- @param width, height, layer The dimensions of the source texture.
+-- @param voxelCount The amount of voxels the mesh can hold.
+-- @param usage How the mesh is supposed to be used (stream, dynamic, static).
+-- @returns A new VoxelBatch object.
+function VoxelBatch.new(texture, layers, voxelCount, usage)
+   local vertices = newVertices(texture:getWidth(), texture:getHeight()  / layers, layers)
+   local modelAttributes, instanceData, vertexBuffer = newModelAttributes(voxelCount) 
+
+   local mesh = love.graphics.newMesh(VoxelBatch.vertexFormat, vertices, "triangles", usage)
+   mesh:setVertexMap(newVertexMap(layers))
+   mesh:setTexture(texture)
+
+   mesh:attachAttribute("MatRow1", modelAttributes, "perinstance")
+   mesh:attachAttribute("MatRow2", modelAttributes, "perinstance")
+   mesh:attachAttribute("MatRow3", modelAttributes, "perinstance")
+   mesh:attachAttribute("MatRow4", modelAttributes, "perinstance")
+
+   mesh:attachAttribute("VertexColor", modelAttributes, "perinstance")
+
+   return setmetatable({
+      voxelCount = voxelCount,
+
+      mesh            = mesh,
+      modelAttributes = modelAttributes,
+      instanceData    = instanceData,
+      vertexBuffer    = vertexBuffer,
+      
+      nextFreeIndex = 1,
+      isDirty       = false,
+   }, VoxelBatch)
+end
+
+--- Applies updated voxels to the mesh.
+-- @returns self
+function VoxelBatch:flush()
+   self.modelAttributes:setVertices(self.instanceData)
+   self.isDirty = false
+
+   return self
+end
+
+function VoxelBatch:set(index, ...)
+   -- TODO Check if index is < nextFreeIndex
+   local instance = self.vertexBuffer[index - 1]
+   
+   instance:setTransformation(...)
+
+   local r, g, b = love.graphics.getColor()
+   instance.r = r * 255
+   instance.g = g * 255
+   instance.b = b * 255
+   instance.a =     255
+
+   self.isDirty = true
+   return self
+end
+
+function VoxelBatch:add(...)
+   -- TODO Check if the index is < voxelCount
+   local index = self.nextFreeIndex
+
+   self.nextFreeIndex = index + 1
+   self:set(index, ...)
+
+   return index
+end
+
+function VoxelBatch:clear()
+   Ffi.fill(self.instanceData:getPointer(), self.instanceData:getSize())
+   
+   self.nextFreeIndex = 1
+   self.isDirty       = true
+
+   return self
+end
+
+function VoxelBatch:getCount()
+   return self.nextFreeIndex - 1
+end
+
+function VoxelBatch:getBufferSize()
+   return self.voxelCount
+end
+
+function VoxelBatch:attachAttribute(...)
+   self.mesh:attachAttribute(...)
+end
+
+function VoxelBatch:getTexture()
+   return self.mesh:getTexture()
+end
+
+-- function VoxelBatch:setTexture(texture)
+--    -- Should this reevaluate the mesh?
+--    -- Mesh size is static so you would need to keep the number of layers
+--    self.mesh:setTexture(texture)
+-- end
+
+--- Draws a voxel.
+-- @returns self
+function VoxelBatch:draw()
+   if self.isDirty then
+      self:flush()
+   end
+
+   love.graphics.drawInstanced(self.mesh, self.voxelCount)
+
+   return self
+end
+
+return setmetatable(VoxelBatch, {
+   __call = function(_, ...) return VoxelBatch.new(...) end,
+})
