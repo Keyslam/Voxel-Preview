@@ -1,6 +1,6 @@
 love.graphics.setDefaultFilter("nearest", "nearest")
 love.graphics.setBackgroundColor(0.1, 0.1, 0.1)
-love.filesystem.mount("vox2png", "items")
+love.filesystem.mount("voxels", "items")
 
 local Imgui = require("imgui")
 
