@@ -147,3 +147,7 @@ end
 function love.directorydropped(path)
    love.filesystem.mount(path, "items")
 end
+
+function love.resize(w, h)
+   Viewer.camera:resize(w, h)
+end
