@@ -44,7 +44,7 @@ local function newVertices(width, height, layers)
 
    for layer = 0, layers - 1 do
       -- Tbh this part is magic and if anything ever breaks here, just redo it all
-      local start_v, end_v = 1 - layer * uvStep - uvStep, 1 - layer * uvStep
+      local start_v, end_v =  1 - (layer + 1) * uvStep, 1 - layer * uvStep
       local o = (layer * 4)
 
       local z = layer
