@@ -1,6 +1,6 @@
 love.graphics.setDefaultFilter("nearest", "nearest")
 love.graphics.setBackgroundColor(0.1, 0.1, 0.1)
-love.filesystem.mount("voxels", "voxels")
+love.filesystem.mount("vox2png", "items")
 
 local Imgui = require("imgui")
 
@@ -16,19 +16,25 @@ local Viewer = {
    layers = 1,
    batch  = nil,
 
-   scale = 1,
+   scale       = 1,
    cameraScale = 1,
+   autoRotate  = true,
+   rotation    = 0,
 
    lastModified = nil,
+
+   x = 0,
+   y = 0,
+   z = 0,
 }
 
 local function buildBatch()
    local extension = Viewer.selected:match("^.+(%..+)$")
 
    if extension == ".png" then
-      Viewer.image = love.graphics.newImage("voxels/"..Viewer.selected)
+      Viewer.image = love.graphics.newImage("items/"..Viewer.selected)
    elseif extension == ".vox" then
-      local file = love.filesystem.newFile("voxels/"..Viewer.selected)
+      local file = love.filesystem.newFile("items/"..Viewer.selected)
       file:open("r")
 		   local model = Vox_model.new(file:read())
       file:close()
@@ -36,22 +42,26 @@ local function buildBatch()
    end
 
    Viewer.batch = Lovox.voxelBatch(Viewer.image, Viewer.layers, 1, "static")
-   Viewer.batch:add(0, 360 / Viewer.cameraScale, 360 / Viewer.cameraScale, 0, Viewer.scale)
+   Viewer.batch:add(0, love.graphics.getWidth()/2 / Viewer.cameraScale, love.graphics.getHeight()/2 / Viewer.cameraScale, v, Viewer.scale)
 
-   Viewer.lastModified = love.filesystem.getInfo("voxels/"..Viewer.selected).modtime
+   Viewer.lastModified = love.filesystem.getInfo("items/"..Viewer.selected).modtime
 end
 
 function love.load(arg)
 end
 
 function love.update(dt)
+   if Viewer.autoRotate then
+      Viewer.rotation = Viewer.rotation + dt % (2*math.pi)
+   end
+
    if Viewer.batch then
-      if Viewer.lastModified ~= love.filesystem.getInfo("voxels/"..Viewer.selected).modtime then
+      if Viewer.lastModified ~= love.filesystem.getInfo("items/"..Viewer.selected).modtime then
          love.timer.sleep(0.5)
          buildBatch()
       end
 
-      Viewer.batch:set(1, 360 / Viewer.cameraScale, 360 / Viewer.cameraScale, 0, 1 -love.timer.getTime(), Viewer.scale)
+      Viewer.batch:set(1, (Viewer.x + love.graphics.getWidth()/2) / Viewer.cameraScale, (Viewer.y + love.graphics.getHeight()/2) / Viewer.cameraScale, Viewer.z, 1 - Viewer.rotation, Viewer.scale)
    end
 
    Imgui.NewFrame()
@@ -67,7 +77,7 @@ function love.draw()
    end
 
    if Imgui.Begin("Open") then
-      local files = love.filesystem.getDirectoryItems("voxels")
+      local files = love.filesystem.getDirectoryItems("items")
 
       for i, fileName in ipairs(files) do
          if Imgui.Selectable(fileName, fileName == Viewer.selected) then
@@ -81,9 +91,14 @@ function love.draw()
    if Imgui.Begin("Settings") then
       local status
 
+      Viewer.x, Viewer.y, Viewer.z = Imgui.DragInt3("Position", Viewer.x, Viewer.y, Viewer.z)
+
+      Viewer.scale, Viewer.cameraScale = Imgui.DragFloat2("Scale", Viewer.scale, Viewer.cameraScale, 0.1, 1, 100)
+
       Viewer.layers, status = Imgui.DragFloat("Layers", Viewer.layers, 1, 1, 8192)
-      Viewer.scale = Imgui.DragFloat("Scale", Viewer.scale, 0.1, 1, 100)
-      Viewer.cameraScale = Imgui.DragFloat("Camera scale", Viewer.cameraScale, 0.1, 1, 100)
+
+      Viewer.rotation   = Imgui.DragFloat("Rotation", Viewer.rotation, 0.1) % (2*math.pi)
+      Viewer.autoRotate = Imgui.Checkbox("Auto Rotate", Viewer.autoRotate)
 
       if status then
          buildBatch()
@@ -126,4 +141,9 @@ function love.wheelmoved(x, y)
    if not Imgui.GetWantCaptureMouse() then
       Viewer.scale = math.max(1, math.min(Viewer.scale + y/10, 100))
    end
+end
+
+
+function love.directorydropped(path)
+   love.filesystem.mount(path, "items")
 end
